@@ -49,11 +49,13 @@ def create_vector_store(chunked_documents, embed_model, owner, repo):
         persist_directory="./chroma_db"
     )
 
-    existing_ids = vector_store.get()["ids"]
+    vector_store.delete_collection()
 
-    if existing_ids:
-        vector_store.delete(ids=existing_ids)
-
+    vector_store = Chroma(
+        collection_name=collection_name,
+        embedding_function=embed_model,
+        persist_directory="./chroma_db"
+    )
 
     if chunked_documents:
         chunk_ids = generate_chunk_ids(
