@@ -2,6 +2,7 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language, MarkdownTextSplitter
 from langchain_core.documents import Document
 from tree_sitter_language_pack import process, ProcessConfig
+from language_utils import normalize_language
 
 
 CHUNKER_REGISTRY = {
@@ -53,9 +54,8 @@ CATEGORY_MAP = {
     "notebook": None,
 }
 
-
 def tree_sitter_chunk(doc):
-    language = doc.metadata.get("language", "").lower()
+    language = normalize_language(doc.metadata.get("language"))
     parser_language = TREE_SITTER_LANGUAGES.get(language)
 
     if parser_language is None:
@@ -63,30 +63,63 @@ def tree_sitter_chunk(doc):
 
     try:
         result = process(doc.page_content, ProcessConfig(language=parser_language, chunk_max_size=1000))
+
+        if not result.chunks:
+            return []
+
+        if any(chunk.metadata.has_error_nodes for chunk in result.chunks):
+            return []
+
+        if any(chunk.start_line + 1 > chunk.end_line for chunk in result.chunks):
+            return []
+
     except Exception:
         return []
 
     chunked_documents = []
 
     for chunk in result.chunks:
+        content = chunk.content
+        context_path = list(chunk.metadata.context_path or [])
+        structures = result.structure
+        headers = []
+
+        for name in context_path:
+            symbol = next((item for item in structures if item.name == name), None)
+
+            if symbol is None:
+                break
+
+            signature = getattr(symbol, "signature", None)
+
+            if signature and signature not in content:
+                headers.append(f"Enclosing symbol: {signature}")
+
+            structures = symbol.children
+
+        if headers:
+            content = "\n".join(headers) + "\n\n" + content
+
         metadata = {
             **doc.metadata,
             "chunker": "tree_sitter",
             "start_line": chunk.start_line + 1,
             "end_line": chunk.end_line,
             "chunk_index": chunk.metadata.chunk_index,
+            "context_path": ".".join(context_path),
+            "symbol_name": context_path[-1] if context_path else "",
         }
-        chunked_documents.append(Document(page_content=chunk.content, metadata=metadata))
+
+        chunked_documents.append(Document(page_content=content, metadata=metadata))
 
     return chunked_documents
-
 
 def chunk_documents(documents):
     chunked_documents = []
 
     for doc in documents:
         category = doc.metadata.get("category")
-        language = (doc.metadata.get("language") or "").lower()
+        language = normalize_language(doc.metadata.get("language"))
         splitter_language = CHUNKER_REGISTRY.get((category, language))
 
         if category == "code" and language in TREE_SITTER_LANGUAGES:

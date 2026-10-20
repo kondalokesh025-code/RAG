@@ -5,6 +5,8 @@ import base64
 import os 
 from dotenv import load_dotenv
 from pathlib import Path 
+from language_utils import normalize_language 
+
 load_dotenv()
 token = os.getenv("GITHUB_TOKEN")
 headers = {"Authorization" : f"Bearer {token}"}
@@ -251,23 +253,46 @@ def ingest_repository( owner , repo ) :
         content = process_file(file , file_bytes )
         if content is None : 
             continue 
+      
         if isinstance(content, dict):
-            for cell in content["cells"]:
-                if cell["cell_type"] in ["code", "markdown"]:
-                    source = cell["source"]
+            notebook_metadata = content.get("metadata") or {}
+            language_info = notebook_metadata.get("language_info") or {}
+            kernelspec = notebook_metadata.get("kernelspec") or {}
 
-                    if isinstance(source, list):
-                        source = "".join(source)
-                    if not source.strip():
-                        continue    
+            notebook_language = normalize_language(
+                language_info.get("name") or kernelspec.get("language")
+            )
 
-                    doc = Document(
-                        page_content=source,
-                        metadata={"source": file["path"] , 
-                                "category": file["category"],
-                                "language": file["language"]}
-                    )
-                    documents.append(doc)
+            for cell_index, cell in enumerate(content.get("cells", [])):
+                cell_type = cell.get("cell_type")
+                source = cell.get("source", "")
+
+                if isinstance(source, list):
+                    source = "".join(source)
+
+                if not source.strip():
+                    continue
+
+                if cell_type == "code":
+                    category = "code"
+                    language = notebook_language
+                elif cell_type == "markdown":
+                    category = "markup"
+                    language = "markdown"
+                else:
+                    continue
+
+                documents.append(Document(
+                    page_content=source,
+                    metadata={
+                        "source": file["path"],
+                        "category": category,
+                        "language": language,
+                        "cell_type": cell_type,
+                        "cell_index": cell_index,
+                    },
+                ))
+
 
 
         if isinstance ( content , str ) : 
