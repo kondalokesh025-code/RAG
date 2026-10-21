@@ -5,6 +5,7 @@ from embedding import get_embedding_model
 from vector_store import create_vector_store
 from retrieval import build_retrievers
 from eval_retrieval import evaluate_retrieval
+from generation import generate
 import time 
 url = "https://github.com/kondalokesh025-code/ANN.git"
 
@@ -12,7 +13,6 @@ p = parse(url)
 
 owner = p.owner 
 repo = p.repo 
-
 
 if   __name__ == "__main__" :
     start_time = time.perf_counter()
@@ -23,12 +23,30 @@ if   __name__ == "__main__" :
 
     vector_store = create_vector_store(chunked_documents , embed_model , owner , repo )
 
-    rerank = build_retrievers(chunked_documents, vector_store)
+    rerank  = build_retrievers(chunked_documents, vector_store)
 
-    evaluate_retrieval(chunked_documents , vector_store , rerank )
+    query = "what database does this repository use ? "
 
-    end_time = time.perf_counter()
-    print(f"\nTotal application runtime: {end_time - start_time:.2f} seconds")
+    # Retrieve relevant chunks
+    retrieval_start = time.perf_counter()
+    chunks = rerank(query)
+    retrieval_time = time.perf_counter() - retrieval_start
+
+    # Generate an answer
+    generation_start = time.perf_counter()
+    answer = generate(query, chunks)
+    generation_time = time.perf_counter() - generation_start
+
+    print("\n========== ANSWER ==========")
+    print(answer)
+
+    print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
+    print(f"Generation time: {generation_time:.2f} seconds")
+    print(f"Total application runtime: {time.perf_counter() - start_time:.2f} seconds")
+    
+
+
+
 
 
 
