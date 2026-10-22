@@ -7,3 +7,11 @@ langchain-chroma
 sentence-transformers
 pypdf
 requests
+langchain
+langchain-classic
+chromadb
+rank-bm25
+tree-sitter
+tree-sitter-language-pack
+giturlparse
+nbformat
