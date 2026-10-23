@@ -9,7 +9,10 @@ from language_utils import normalize_language
 
 load_dotenv()
 token = os.getenv("GITHUB_TOKEN")
-headers = {"Authorization" : f"Bearer {token}"}
+headers = {"Accept": "application/vnd.github+json"}
+
+if token:
+    headers["Authorization"] = f"Bearer {token}"
 
 
 
