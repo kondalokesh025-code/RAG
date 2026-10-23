@@ -7,7 +7,9 @@ from retrieval import build_retrievers
 from eval_retrieval import evaluate_retrieval
 from generation import generate
 import time 
-url = "https://github.com/kondalokesh025-code/ANN.git"
+
+url = "https://github.com/pallets/click.git"
+
 
 p = parse(url)
 
@@ -43,7 +45,7 @@ if   __name__ == "__main__" :
     print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
     print(f"Generation time: {generation_time:.2f} seconds")
     print(f"Total application runtime: {time.perf_counter() - start_time:.2f} seconds")
-    
+    print( evaluate_retrieval(chunked_documents , vector_store , rerank ))
 
 
 
