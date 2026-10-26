@@ -1,54 +1,123 @@
-from  giturlparse import parse 
+from giturlparse import parse
+from collections import Counter
+import time
 from ingestion import ingest_repository
 from chunking import chunk_documents
 from embedding import get_embedding_model
 from vector_store import create_vector_store
 from retrieval import build_retrievers
 from eval_retrieval import evaluate_retrieval
-from generation import generate
-import time 
+
 
 url = "https://github.com/pallets/click.git"
 
+parsed = parse(url)
+owner = parsed.owner
+repo = parsed.repo
 
-p = parse(url)
+EXPECTED_FILES = [
+    "src/click/core.py",
+    "src/click/decorators.py",
+    "src/click/exceptions.py",
+    "src/click/types.py",
+    "src/click/testing.py",
+    "src/click/parser.py",
+    "src/click/utils.py",
+    "src/click/termui.py",
+]
 
-owner = p.owner 
-repo = p.repo 
 
-if   __name__ == "__main__" :
+if __name__ == "__main__":
     start_time = time.perf_counter()
 
+    # 1. INGESTION
+    print("\n===== INGESTION =====")
+
+    start = time.perf_counter()
     documents = ingest_repository(owner, repo)
+
+    document_paths = {
+        doc.metadata.get("source", "")
+        for doc in documents
+    }
+
+    print("Documents:", len(documents))
+    print("Unique files:", len(document_paths))
+
+    print("\nSource-file coverage after ingestion:")
+    for path in EXPECTED_FILES:
+        status = "FOUND" if path in document_paths else "MISSING"
+        print(f"{status}: {path}")
+
+    print(f"Ingestion time: {time.perf_counter() - start:.2f}s")
+
+    # 2. CHUNKING
+    print("\n===== CHUNKING =====")
+
+    start = time.perf_counter()
     chunked_documents = chunk_documents(documents)
+
+    chunk_paths = {
+        chunk.metadata.get("source", "")
+        for chunk in chunked_documents
+    }
+
+    print("Total chunks:", len(chunked_documents))
+    print("Unique files represented:", len(chunk_paths))
+
+    print("\nSource-file coverage after chunking:")
+    for path in EXPECTED_FILES:
+        status = "FOUND" if path in chunk_paths else "MISSING"
+        print(f"{status}: {path}")
+
+    print("\nChunks by category:")
+    print(Counter(
+        chunk.metadata.get("category", "unknown")
+        for chunk in chunked_documents
+    ))
+
+    print(f"Chunking time: {time.perf_counter() - start:.2f}s")
+
+    if not chunked_documents:
+        raise RuntimeError("No chunks were created.")
+
+    # 3. EMBEDDING MODEL
+    print("\n===== EMBEDDING MODEL =====")
+
+    start = time.perf_counter()
     embed_model = get_embedding_model()
+    print(f"Model loading time: {time.perf_counter() - start:.2f}s")
 
-    vector_store = create_vector_store(chunked_documents , embed_model , owner , repo )
+    # 4. VECTOR STORE
+    print("\n===== VECTOR STORE =====")
 
-    rerank  = build_retrievers(chunked_documents, vector_store)
+    start = time.perf_counter()
+    vector_store = create_vector_store(
+        chunked_documents,
+        embed_model,
+        owner,
+        repo,
+    )
+    print(f"Indexing time: {time.perf_counter() - start:.2f}s")
 
-    query = "what database does this repository use ? "
+    # 5. RETRIEVAL EVALUATION — 23 queries
+    print("\n===== RETRIEVAL EVALUATION =====")
 
-    # Retrieve relevant chunks
-    retrieval_start = time.perf_counter()
-    chunks = rerank(query)
-    retrieval_time = time.perf_counter() - retrieval_start
+    start = time.perf_counter()
+    rerank = build_retrievers(chunked_documents, vector_store)
 
-    # Generate an answer
-    generation_start = time.perf_counter()
-    answer = generate(query, chunks)
-    generation_time = time.perf_counter() - generation_start
+    print(f"Retriever setup time: {time.perf_counter() - start:.2f}s")
 
-    print("\n========== ANSWER ==========")
-    print(answer)
+    evaluate_retrieval(
+        chunked_documents,
+        vector_store,
+        rerank,
+    )
 
-    print(f"\nRetrieval time: {retrieval_time:.2f} seconds")
-    print(f"Generation time: {generation_time:.2f} seconds")
-    print(f"Total application runtime: {time.perf_counter() - start_time:.2f} seconds")
-    print( evaluate_retrieval(chunked_documents , vector_store , rerank ))
-
-
-
+    print(
+        f"\nTotal runtime: {time.perf_counter() - start_time:.2f}s"
+    )
+    print("Generation skipped.")
 
 
 
