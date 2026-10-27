@@ -2,7 +2,8 @@
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language, MarkdownTextSplitter
 from langchain_core.documents import Document
 from tree_sitter_language_pack import process, ProcessConfig
-from language_utils import normalize_language
+from language_utils import normalize_language , TREE_SITTER_LANGUAGES 
+
 
 
 CHUNKER_REGISTRY = {
@@ -32,19 +33,7 @@ CHUNKER_REGISTRY = {
 }
 
 
-TREE_SITTER_LANGUAGES = {
-    "python": "python", "cpp": "cpp", "c": "c", "go": "go",
-    "java": "java", "kotlin": "kotlin", "javascript": "javascript",
-    "typescript": "typescript", "php": "php", "protobuf": "proto",
-    "r": "r", "ruby": "ruby", "rust": "rust", "scala": "scala",
-    "swift": "swift", "lua": "lua", "perl": "perl", "haskell": "haskell",
-    "elixir": "elixir", "powershell": "powershell", "bash": "bash",
-    "json": "json", "yaml": "yaml", "sql": "sql", "html": "html",
-    "css": "css", "dockerfile": "dockerfile", "toml": "toml",
-    "xml": "xml", "make": "make", "markdown": "markdown",
-    "julia": "julia", "dart": "dart", "zig": "zig",
-    "fsharp": "fsharp", "ocaml": "ocaml",
-}
+
 
 
 CATEGORY_MAP = {
