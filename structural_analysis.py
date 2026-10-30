@@ -1,292 +1,177 @@
-from tree_sitter_language_pack import process, ProcessConfig, get_parser
+
+from functools import lru_cache
+
+from tree_sitter import Parser, Query, QueryCursor
+from tree_sitter_language_pack import get_language, get_tags_query
 
 from chunking import TREE_SITTER_LANGUAGES
 from language_utils import normalize_language
 
 
 MAX_SOURCE_BYTES = 1_000_000
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 PARSER_ALIASES = {"shell": "bash"}
+MAX_DIAGNOSTICS = 50
 
 
-def get_line_range(span):
-    start_line = span.start_line + 1
-    end_line = span.end_line if span.end_column == 0 and span.end_line > span.start_line else span.end_line + 1
-    return start_line, max(start_line, end_line)
+@lru_cache(maxsize=None)
+def get_language_object(language):
+    return get_language(language)
 
 
-def get_value(value):
-    return str(getattr(value, "value", value))
-
-
-def walk_nodes(node):
-    yield node
-    for child in node.children:
-        yield from walk_nodes(child)
-
-
-def get_node_text(node, source_bytes):
-    return source_bytes[node.start_byte:node.end_byte].decode("utf-8")
-
-
-def get_python_syntax_root(content):
-    tree = get_parser("python").parse(content.encode("utf-8"))
-    return tree.root_node if tree is not None else None
-
-
-def get_decorator_starts(root, source_bytes):
-    starts = {}
-
-    if root is None:
-        return starts
-
-    for node in walk_nodes(root):
-        if node.type not in {"function_definition", "class_definition"}:
-            continue
-
-        parent = node.parent
-
-        if parent is None or parent.type != "decorated_definition":
-            continue
-
-        name_node = node.child_by_field_name("name")
-
-        if name_node is None:
-            continue
-
-        name = get_node_text(name_node, source_bytes)
-        definition_line = node.start_point.row + 1
-        decorator_line = parent.start_point.row + 1
-        starts[(name, definition_line)] = decorator_line
-
-    return starts
-
-
-def is_module_assignment(node):
-    parent = node.parent
-
-    while parent is not None and parent.type == "expression_statement":
-        parent = parent.parent
-
-    return parent is not None and parent.type == "module"
-
-
-
-def get_string_literal_value(node, source_bytes):
-    raw = get_node_text(node, source_bytes)
-    prefix_end = 0
-
-    while prefix_end < len(raw) and raw[prefix_end].lower() in "rubf":
-        prefix_end += 1
-
-    prefix = raw[:prefix_end].lower()
-    literal = raw[prefix_end:]
-
-    if "b" in prefix or "f" in prefix:
+@lru_cache(maxsize=None)
+def get_tags_query_object(language):
+    query_source = get_tags_query(language)
+    if not query_source:
         return None
-
-    if literal.startswith(("'''", '"""')):
-        delimiter = literal[:3]
-    elif literal.startswith(("'", '"')):
-        delimiter = literal[0]
-    else:
-        return None
-
-    if not literal.endswith(delimiter):
-        return None
-
-    value = literal[len(delimiter):-len(delimiter)]
-
-    if "\\" in value and "r" not in prefix:
-        return None
-
-    return value
+    return Query(get_language_object(language), query_source)
 
 
-def get_python_all_exports(root, source_bytes, source_key):
-    if root is None:
-        return []
+def extract_tags(content, parser_language, source):
+    source_bytes = content.encode("utf-8")
+    parser = Parser(get_language_object(parser_language))
+    tree = parser.parse(source_bytes)
+    query = get_tags_query_object(parser_language)
 
-    export_names = []
-    export_node = None
+    if query is None:
+        return [], "query_unavailable", tree
 
-    for node in walk_nodes(root):
-        if node.type not in {"assignment", "annotated_assignment"}:
-            continue
+    cursor = QueryCursor(query)
+    matches = cursor.matches(tree.root_node)
 
-        if not is_module_assignment(node):
-            continue
+    tags = []
+    seen = set()
 
-        left = node.child_by_field_name("left")
-        value = node.child_by_field_name("right")
+    for _, match in matches:
+        name_nodes = match.get("name", [])
 
-        if value is None:
-            value = node.child_by_field_name("value")
-
-        if left is None or get_node_text(left, source_bytes).strip() != "__all__":
-            continue
-
-        export_node = node
-        export_names = []
-
-        if value is None or value.type not in {"list", "tuple", "set"}:
-            continue
-
-        for child in value.named_children:
-            if child.type != "string":
+        for capture_name, kind_nodes in match.items():
+            if capture_name.startswith("definition."):
+                role, kind = "definition", capture_name.split(".", 1)[1]
+            elif capture_name.startswith("reference."):
+                role, kind = "reference", capture_name.split(".", 1)[1]
+            else:
                 continue
 
-            name = get_string_literal_value(child, source_bytes)
+            for kind_node in kind_nodes:
+                for node in name_nodes:
+                    if not (kind_node.start_byte <= node.start_byte and node.end_byte <= kind_node.end_byte):
+                        continue
 
-            if name is not None:
-                export_names.append(name)
+                    name = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
+                    if not name:
+                        continue
 
-    if not export_names or export_node is None:
-        return []
+                    key = (role, kind, node.start_byte, node.end_byte)
+                    if key in seen:
+                        continue
+                    seen.add(key)
 
-    start_line = export_node.start_point.row + 1
-    end_line = export_node.end_point.row + 1
+                    tags.append({
+                        "id": f"{source}::{role}.{kind}@{node.start_point.row + 1}:{node.start_point.column + 1}",
+                        "role": role,
+                        "kind": kind,
+                        "name": name,
+                        "line": node.start_point.row + 1,
+                        "end_line": node.end_point.row + 1,
+                        "column": node.start_point.column + 1,
+                        "end_column": node.end_point.column + 1,
+                        "start_byte": node.start_byte,
+                        "end_byte": node.end_byte,
+                    })
 
-    return [
-        {
-            "id": f"{source_key}::export@{start_line}:{name}",
-            "name": name,
-            "kind": "declared_public_export",
-            "start_line": start_line,
-            "end_line": end_line,
-        }
-        for name in dict.fromkeys(export_names)
-    ]
+    tags.sort(key=lambda item: (item["line"], item["column"], item["role"]))
+
+    if not tags:
+        return tags, "no_matches", tree
+
+    roles = {tag["role"] for tag in tags}
+    status = "ok" if roles == {"definition", "reference"} else "definitions_only" if roles == {"definition"} else "references_only"
+
+    return tags, status, tree
+
+
+def extract_diagnostics(root):
+    diagnostics = []
+    total = 0
+    stack = [root]
+
+    while stack:
+        node = stack.pop()
+
+        if node.is_error or node.is_missing:
+            total += 1
+
+            if len(diagnostics) < MAX_DIAGNOSTICS:
+                diagnostics.append({
+                    "type": "missing_node" if node.is_missing else "syntax_error",
+                    "node_type": node.type,
+                    "line": node.start_point.row + 1,
+                    "column": node.start_point.column + 1,
+                })
+
+        stack.extend(reversed(node.children))
+
+    return diagnostics, total
+
 
 def extract_file_structure(doc):
     metadata = doc.metadata
     content = doc.page_content
     source = metadata.get("source") or "<unknown>"
     language = normalize_language(metadata.get("language"))
-    cell_index = metadata.get("cell_index")
-    source_key = f"{source}#cell={cell_index}" if cell_index is not None else source
+    parser_language = PARSER_ALIASES.get(language, TREE_SITTER_LANGUAGES.get(language))
 
     record = {
         "schema_version": SCHEMA_VERSION,
         "source": source,
         "language": language,
-        "cell_index": cell_index,
-        "location_scope": "cell" if cell_index is not None else "file",
+        "category": metadata.get("category", "unknown"),
+        "cell_index": metadata.get("cell_index"),
+        "location_scope": "cell" if metadata.get("cell_index") is not None else "file",
         "status": None,
+        "tag_status": "not_run",
         "definitions": [],
-        "imports": [],
-        "exports": [],
-        "docstrings": [],
+        "references": [],
+        "tags": [],
         "diagnostics": [],
     }
 
     if metadata.get("category") != "code":
         record["status"] = "skipped_non_code"
+        record["tag_status"] = "skipped_non_code"
         return record
-
-    parser_language = PARSER_ALIASES.get(language, TREE_SITTER_LANGUAGES.get(language))
 
     if parser_language is None:
         record["status"] = "unsupported_language"
-        return record
-
-    if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
-        record["status"] = "skipped_too_large"
-        return record
-
-    try:
-        parsed = process(content, ProcessConfig(language=parser_language, structure=True, imports=True, exports=True, docstrings=True, diagnostics=True, chunk_max_size=None))
-    except Exception as exc:
-        record["status"] = "parse_failed"
-        record["error"] = str(exc)
+        record["tag_status"] = "unsupported_language"
         return record
 
     source_bytes = content.encode("utf-8")
-    raw_root = None
-    decorator_starts = {}
+    if len(source_bytes) > MAX_SOURCE_BYTES:
+        record["status"] = "skipped_too_large"
+        record["tag_status"] = "skipped_too_large"
+        return record
 
-    if language == "python":
-        try:
-            raw_root = get_python_syntax_root(content)
-            decorator_starts = get_decorator_starts(raw_root, source_bytes)
-        except Exception as exc:
-            record["diagnostics"].append({"message": f"Raw syntax inspection failed: {exc}"})
+    source_key = f"{source}#cell={metadata['cell_index']}" if metadata.get("cell_index") is not None else source
 
-    def extract_definitions(items, parent=None):
-        for item in items:
-            start_line, end_line = get_line_range(item.span)
-            name = item.name or f"<anonymous@{start_line}>"
-            qualified_name = f"{parent}.{name}" if parent else name
+    try:
+        tags, tag_status, tree = extract_tags(content, parser_language, source_key)
+        diagnostics, diagnostic_count = extract_diagnostics(tree.root_node)
 
-            if language == "python":
-                start_line = decorator_starts.get((name, start_line), start_line)
+        record["tags"] = tags
+        record["definitions"] = [tag for tag in tags if tag["role"] == "definition"]
+        record["references"] = [tag for tag in tags if tag["role"] == "reference"]
+        record["tag_status"] = tag_status
+        record["diagnostics"] = diagnostics
+        record["diagnostic_count"] = diagnostic_count
+        record["diagnostics_truncated"] = diagnostic_count > MAX_DIAGNOSTICS
+        record["status"] = "ok_with_diagnostics" if diagnostic_count else "ok"
 
-            record["definitions"].append({
-                "id": f"{source_key}::{qualified_name}@{start_line}",
-                "name": item.name,
-                "qualified_name": qualified_name,
-                "parent": parent,
-                "kind": get_value(item.kind),
-                "signature": item.signature,
-                "doc_comment": item.doc_comment,
-                "visibility": item.visibility,
-                "start_line": start_line,
-                "end_line": end_line,
-            })
+    except Exception as exc:
+        record["status"] = "parse_failed"
+        record["tag_status"] = "failed"
+        record["error"] = str(exc)
 
-            extract_definitions(item.children, qualified_name)
-
-    extract_definitions(parsed.structure)
-
-    for index, item in enumerate(parsed.imports):
-        start_line, end_line = get_line_range(item.span)
-        record["imports"].append({
-            "id": f"{source_key}::import@{start_line}:{index}",
-            "statement": item.source,
-            "items": list(item.items),
-            "alias": item.alias,
-            "is_wildcard": item.is_wildcard,
-            "start_line": start_line,
-            "end_line": end_line,
-        })
-
-    for index, item in enumerate(parsed.exports):
-        start_line, end_line = get_line_range(item.span)
-        record["exports"].append({
-            "id": f"{source_key}::export@{start_line}:{index}",
-            "name": item.name,
-            "kind": get_value(item.kind),
-            "start_line": start_line,
-            "end_line": end_line,
-        })
-
-    if language == "python":
-        existing_exports = {item["name"] for item in record["exports"] if item["name"]}
-        for item in get_python_all_exports(raw_root, source_bytes, source_key):
-            if item["name"] not in existing_exports:
-                record["exports"].append(item)
-                existing_exports.add(item["name"])
-
-    for index, item in enumerate(parsed.docstrings):
-        start_line, end_line = get_line_range(item.span)
-        record["docstrings"].append({
-            "id": f"{source_key}::docstring@{start_line}:{index}",
-            "associated_item": item.associated_item,
-            "format": get_value(item.format),
-            "text": item.text,
-            "start_line": start_line,
-            "end_line": end_line,
-        })
-
-    for item in parsed.diagnostics:
-        start_line, end_line = get_line_range(item.span)
-        record["diagnostics"].append({
-            "message": item.message,
-            "severity": get_value(item.severity),
-            "start_line": start_line,
-            "end_line": end_line,
-        })
-
-    record["status"] = "ok_with_diagnostics" if record["diagnostics"] else "ok"
     return record

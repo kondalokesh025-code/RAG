@@ -11,105 +11,102 @@ def evaluate_retrieval(chunked_documents, vector_store, rerank):
     K = 5
 
     # Test queries and their expected source files
+        
     queries = [
         {
-            "input": "Where is the main Command class implemented?",
-            "expected_sources": ["src/click/core.py"]
+            "input": "Where is the main Signer class implemented?",
+            "expected_sources": ["src/itsdangerous/signer.py"]
         },
         {
-            "input": "How does Click define commands using decorators?",
-            "expected_sources": ["src/click/decorators.py", "docs/quickstart.md"]
+            "input": "How does ItsDangerous generate HMAC signatures?",
+            "expected_sources": ["src/itsdangerous/signer.py"]
         },
         {
-            "input": "Where are command-line options and arguments represented?",
-            "expected_sources": ["src/click/core.py"]
+            "input": "How are signing keys derived from secret keys and salts?",
+            "expected_sources": ["src/itsdangerous/signer.py"]
         },
         {
-            "input": "How does Click create and manage the command context?",
-            "expected_sources": ["src/click/core.py"]
+            "input": "How does Signer create and verify signatures?",
+            "expected_sources": ["src/itsdangerous/signer.py"]
         },
         {
-            "input": "How does a Click Group invoke subcommands?",
-            "expected_sources": ["src/click/core.py"]
+            "input": "How does ItsDangerous support secret key rotation?",
+            "expected_sources": ["src/itsdangerous/signer.py", "src/itsdangerous/serializer.py"]
         },
         {
-            "input": "How are option declarations converted into command parameters?",
-            "expected_sources": ["src/click/decorators.py", "src/click/core.py"]
+            "input": "How does Serializer serialize and sign arbitrary Python objects?",
+            "expected_sources": ["src/itsdangerous/serializer.py"]
         },
         {
-            "input": "How does Click handle missing or invalid command-line parameters?",
-            "expected_sources": ["src/click/exceptions.py", "src/click/core.py"]
+            "input": "How does Serializer verify signatures and deserialize payloads?",
+            "expected_sources": ["src/itsdangerous/serializer.py", "src/itsdangerous/signer.py"]
         },
         {
-            "input": "Where are parameter types and value conversion implemented?",
-            "expected_sources": ["src/click/types.py"]
+            "input": "How are serialized payloads converted into bytes?",
+            "expected_sources": ["src/itsdangerous/serializer.py", "src/itsdangerous/encoding.py"]
         },
         {
-            "input": "How does Click display command-line help?",
-            "expected_sources": ["src/click/core.py", "src/click/formatting.py"]
+            "input": "How does ItsDangerous handle invalid payloads and signatures?",
+            "expected_sources": ["src/itsdangerous/exc.py", "src/itsdangerous/serializer.py"]
         },
         {
-            "input": "How does Click print output to the terminal?",
-            "expected_sources": ["src/click/utils.py"]
+            "input": "How does TimestampSigner attach timestamps to signatures?",
+            "expected_sources": ["src/itsdangerous/timed.py"]
         },
         {
-            "input": "How are interactive prompts and confirmations implemented?",
-            "expected_sources": ["src/click/termui.py"]
+            "input": "How does ItsDangerous validate signature expiration using max_age?",
+            "expected_sources": ["src/itsdangerous/timed.py", "src/itsdangerous/exc.py"]
         },
         {
-            "input": "How does Click handle errors raised during command execution?",
-            "expected_sources": ["src/click/exceptions.py", "src/click/core.py"]
+            "input": "How does TimedSerializer use TimestampSigner?",
+            "expected_sources": ["src/itsdangerous/timed.py", "src/itsdangerous/serializer.py"]
         },
         {
-            "input": "How can a callback access the current Click context?",
-            "expected_sources": ["src/click/decorators.py", "src/click/globals.py"]
+            "input": "How does URLSafeSerializer encode and decode serialized data?",
+            "expected_sources": ["src/itsdangerous/url_safe.py", "src/itsdangerous/encoding.py"]
         },
         {
-            "input": "How does Click support nested command-line interfaces?",
-            "expected_sources": ["src/click/core.py", "docs/quickstart.md"]
+            "input": "How does ItsDangerous compress data before URL-safe encoding?",
+            "expected_sources": ["src/itsdangerous/url_safe.py"]
         },
         {
-            "input": "Which files implement command definition, parameter parsing, and error handling?",
-            "expected_sources": [
-                "src/click/core.py",
-                "src/click/decorators.py",
-                "src/click/parser.py",
-                "src/click/exceptions.py"
-            ]
+            "input": "How does URLSafeTimedSerializer combine URL-safe serialization with expiration?",
+            "expected_sources": ["src/itsdangerous/url_safe.py", "src/itsdangerous/timed.py"]
         },
         {
-            "input": "Command",
-            "expected_sources": ["src/click/core.py"]
+            "input": "Signer",
+            "expected_sources": ["src/itsdangerous/signer.py"]
         },
         {
-            "input": "Context",
-            "expected_sources": ["src/click/core.py"]
+            "input": "Serializer",
+            "expected_sources": ["src/itsdangerous/serializer.py"]
         },
         {
-            "input": "pass_context",
-            "expected_sources": ["src/click/decorators.py"]
+            "input": "TimestampSigner",
+            "expected_sources": ["src/itsdangerous/timed.py"]
         },
         {
-            "input": "Parameter",
-            "expected_sources": ["src/click/core.py"]
+            "input": "URLSafeSerializer",
+            "expected_sources": ["src/itsdangerous/url_safe.py"]
         },
         {
-            "input": "UsageError",
-            "expected_sources": ["src/click/exceptions.py"]
+            "input": "SignatureExpired",
+            "expected_sources": ["src/itsdangerous/exc.py"]
         },
         {
-            "input": "Option",
-            "expected_sources": ["src/click/core.py"]
+            "input": "HMACAlgorithm",
+            "expected_sources": ["src/itsdangerous/signer.py"]
         },
         {
-            "input": "Choice",
-            "expected_sources": ["src/click/types.py"]
+            "input": "base64_decode",
+            "expected_sources": ["src/itsdangerous/encoding.py"]
         },
         {
-            "input": "CliRunner",
-            "expected_sources": ["src/click/testing.py"]
+            "input": "TimedSerializer",
+            "expected_sources": ["src/itsdangerous/timed.py"]
         }
     ]
+
 
     def normalize_source(source):
         return str(source).replace("\\\\", "/")
